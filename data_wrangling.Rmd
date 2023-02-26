@@ -1,0 +1,371 @@
+---
+title: "combined version"
+author: "iMPAct"
+date: "2023-02-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(unpivotr)
+library(tidyverse)
+library(readxl)
+library(tidyxl)
+library(googlesheets4)
+#library(googledrive)
+
+
+source(file.path(here::here(),"src/paths.R")) #file paths
+```
+
+
+
+# List all the files
+This lists all the files that will be reformatted. In order for files to be reformatted they must all be stored within one folder and named in the format "country_site_year.xslx" eg "ecuador_elmorro_2022.xlsx". If no site name exists, country must currently be listed twice eg (gabon_gabon_2020.xslx) until we determine if the data was collected EEZ wide. To change the Google Drive folder that data is being pulled from, change the data path within the paths.R file in the src folder. 
+```{r}
+file_list <- list.files(path = (file.path(data_path, "raw"))) #list all the files in the raw data folder
+```
+
+# Make a Function to reformat the data
+This section creates a function that takes the old MPS tracker data and converts it to a tidy machine readable format which is consistent across years. The input for the function includes file_cells (must be an xlsx spreadsheet read in use the xlsx_cells function) the format (must be the same xlsx spreadsheet read in using the xlsx_formats) and the name of the file (must be a character string). 
+
+The first half of the function re-formats the excel spreadsheet into a tidy data format, and adds new columns including year, site name and evaluator. It also removes scoring status criteria which will be listed in metadata. The data under categories is renamed to "sub-category", while the headers for each of the sections are named category. For example the category "Vessel Availability" in the old version is listed under the sub_category column in the new version, this was under the "Surveillance and Enforcement" header which is now in the category column. 
+
+The second half of the function modifies sub_categories in the reformatted data to be consistent with the latest(2022) version of the MPS tracker across years. It also involves converting the text in each sub_category to the final name of the sub_category. Final names for sub_categories are based on the names in the 2022 version of the MPS tracker. For example the 2020 sub-category, "MPA has access to various sources of intelligence information for illegal activities", is reworded as "Intelligence Sources" across all years.
+
+When a sub-category is removed entirely in the 2022 version of the tracker, the score is maintained and the sub_category is renamed to a shortened version. For example the sub_category, "A decrease in the number of indirectly caught (e.g. by long lines, gill nets, etc.) protected species" was removed from the tracker after 2020. The score for this category is maintained for years when it was collected and the sub_category is renamed "Decreased Bycatch" 
+
+When two sub-categories are combined in the 2022 version of the tracker, the score is averaged and combined into the final category. For example the 2021 version of the tracker has sub_categories tilted "Management Laws" and "Fishing Regulations". The both are in one sub_category "Laws and Regulations" in the 2022 version of the tracker. In the reformatted data, the two scores for these sub_categories in 2021 are averaged and combined into the "Laws and Regulations" sub_category. The comments from both sub_categories are combined. 
+
+When one sub-category is split into two categories in the 2022 version of the tracker, the score from earlier years of data is duplicated to provide a value for both final sub-categories. For example the sub_category  "Public institutions - Coast Guard/ Navy, Park Wardens, MPA Managers, Central Govt Reps (defense, environment, tourism, fishing/ aquaculture), local government reps collaborate on enforcement and have the resources/ will for enforcement." is split into "National Institutional Collaboration" and "International Institutional Collaboration" in the 2022 version of the tracker. The scores from the earlier version are duplicated so that both final categories have a score across all years where data was collected. 
+
+```{r}
+reformat_function <- function(file_cells, format_cells, file_name){
+#find data for country, site, year and evaluator
+  
+#break the file name into country, site and year 
+name <- as.character(file_name) |> str_remove(".xlsx") #make sure the file name is a character vector and remove the file extension
+#find the country
+country <- strsplit(name, '_', fixed = TRUE)[[1]][1] #split the file name based on _ and take the first element (country)
+#find the site 
+site <- strsplit(name, '_', fixed = TRUE)[[1]][2] #split the file name based on _ and take the 2nd element (site)
+#find the year
+year <- strsplit(name, '_', fixed = TRUE)[[1]][3] #split the file name based on _ and take the 3rd element (year)
+year1 <- year #save the year as a different name for later use in the function 
+  
+#find the person who entered data if available or set as NA
+evaluate_row <- file_cells |> 
+  filter(str_detect(character, "Evaluator") & row < 8 | str_detect(character, "Evaluadores")) #check if there is there is an evaluator section in the data, if not found this will be 0 rows long if found it will be 1 
+
+
+if (nrow(evaluate_row) >0) { #check if evaluator was found in evaluate_row, resulting in length >0 
+evaluate_location <- file_cells |>
+  filter(
+  row == evaluate_row$row & col == evaluate_row$col + 1) #find the spot where the name of the evaluator was found (should be one column over from "evaluator text")
+
+evaluator <- evaluate_location$character #save the name(s) of the evaluator
+} else {
+  evaluator <- NA #if no evaluator was found, set evaluator as NA
+}
+
+#begin reformatting the excel spreadsheet
+
+
+file_cells <- file_cells |> select(row, col, is_blank, data_type, character, numeric, local_format_id) #select only relevant columns
+
+#find the start of the data
+start <- file_cells |> 
+  filter(str_detect(character, "Category")| str_detect(character, "Categoría")) #the first row is always category
+
+#some impact indicator sheets do no have the category/header row, this creates the row if it does not exist
+if (nrow(start) == 0) { 
+  start <-  tibble(row = 5, col = 1, header = 'sub_category')
+  headers <- tibble(row = c(5,5, 5, 5), col = c(1,2,3,4), header = c('sub_category', 'score', 'scoring_criteria', 'comments'))
+}
+
+#find the end of the data, it is always before the Total Score Section 
+end <- file_cells |> filter(str_detect(character, "Total Score")) #
+
+file_cells <- file_cells |> filter(row >= start$row & row < end$row) #filter xlsx cells to be between the start and end of the data 
+
+#looking up the formats based on the format cells file
+
+bold <- format_cells$local$font$bold #find all bold fonts
+
+fill_colour <- format_cells$local$fill$patternFill$fgColor$rgb #find all cells with color
+
+#add information on the format (color and bolding) of the data to the file with the data
+file_cells <- file_cells |>
+  mutate(bold = bold[local_format_id],
+         filled = fill_colour[local_format_id]) |> 
+  filter (is_blank == FALSE) #remove blank cells
+
+#identify indicator types 
+indicator_type <- file_cells |>
+  filter(filled == 'FF9CC2E5' |
+           (str_detect(character, "PROCESS INDICATORS") |
+              str_detect(character, 'INDICADORES DE PROCESO') |
+              str_detect(character, "IMPACT INDICATORS") |
+              str_detect(character, 'INDICADORES DEL PROCESO'))) |> #find indicator type through either the font color or the text 
+  select(row,col, indicator_type = character) |> #save relevant columns 
+  mutate(indicator_type = case_when(
+    str_detect(indicator_type, "PROCESO") ~ 'Process Indicators',
+    str_detect(indicator_type, "Process") ~ "Process Indicators",
+    str_detect(indicator_type,"PROCESS") ~ "Process Indicators",
+    str_detect(indicator_type, "IMPACT") ~ "Impact Indicators",
+    str_detect(indicator_type, "Impact") ~ "Impact Indicators",
+    TRUE ~ indicator_type
+  ))  #if indicator type is in Spanish, change it to English 
+
+#indicator types to remove
+indicator_type_remove <- file_cells |>
+  filter(filled == 'FF9CC2E5' | (str_detect(character, "PROCESS INDICATORS") | str_detect(character, 'INDICADORES DE PROCESO') |
+                                   str_detect(character, "IMPACT INDICATORS") | str_detect(character, 'INDICADORES DEL PROCESO'))) |> #find indicator type through either the font color or the text 
+  select(row,col, indicator_type = character)
+
+
+#identify the categories 
+category <- file_cells |>
+  filter(filled %in% c('FF5B9BD5', 'FFDEEAF6') & !character %in% indicator_type_remove$indicator_type) |> #find everything with the two possible blue font colors for category and remove any indicator type cells 
+  select(row,col, category = character)
+
+#identify the headers
+header_cells <- file_cells |> 
+  filter(filled == 'FFE7E6E6') |> #all header cells are filled with grey 
+  select(row,col, header = character) |> 
+  mutate(header = case_when( #change names of headers for consistency 
+    str_detect(header, 'Categoría') ~ "sub_category", #name all categories as sub_category
+    str_detect(header, 'Category') ~ "sub_category", #name all categories as sub_category
+    str_detect(header, 'Estado 1-5') ~ "score", #rename as score
+    str_detect(header, '1-5') ~ "score", #rename as score
+    str_detect(header, 'Notas') ~ "comments" , #rename notes to comments
+    str_detect(header, 'Notes') ~ "comments" , #rename notes to comments
+    str_detect(header, 'Comentarios Sobre') ~ "comments", #change spanish to english
+    TRUE ~ header) #if no changes made then keep the original header
+    
+    )
+
+if (nrow(header_cells) == 0) {
+  header_cells <- headers
+} #if no header cells were found then use the tibble we made earlier as the header cells
+
+#find only the data 
+data_cells <- file_cells |>
+  filter(!row ==1) |> #data is never in the first row
+  filter(data_type %in% c("character","numeric")) |> #only character and numeric data 
+  filter(!filled %in% c('FF9CC2E5','FFDEEAF6','FFE7E6E6', 'FF5B9BD5')) |> #data is never filled with any of these colors 
+  select(row,col,character,numeric,data_type) #select relevant columns 
+
+data_reformat <- enhead(data_cells,indicator_type, "up-left") |> #create the indicator type column
+  enhead(category, "up-left") |> #create the sub-category column
+  enhead(header_cells, "up") |> #add all of the headers
+  select(-col) |> #remove col
+  spatter(key = header) |> #spread the data so that each header becomea a colum 
+  filter(!is.na(sub_category)) |> #remove any duplicate cells with NA 
+  mutate(year = year, site = site, country = country, entered_by = evaluator) |> #add year, site and entered by columns
+  ungroup() 
+
+column_names <- as.data.frame(names(data_reformat)) |> filter(names(data_reformat) == "comments")
+
+if (length(column_names) <1) {
+  data_reformat <- data_reformat |> mutate(comments = NA)
+}
+
+ data_reformat <- data_reformat |>  select(year, category, sub_category,
+         indicator_type,
+         score, site, country, entered_by, comments) #select and rename columns 
+#initial reformatting of the data into tidy format is complete 
+#Section 2 change the reformatted data to match the final MPS tracker version 
+
+source(file.path(here::here(),"src/subcategory_lookup_table.R")) #pull the table to lookup correct subcategories
+
+sub_category_tab <- sub_category_table |>
+  select(-indicator_type) |>
+  mutate(year = as.numeric(year)) |>
+  filter(year == year1) #filter for the year of data we are using, important so that the correct year from the lookup table is used 
+
+sub_category_tab <- as_tibble(sub_category_tab) #make into a tibble
+
+#determine if staff sufficient and qualified is separate or in one category in this spreadsheet, if separate leave as is 
+
+split <- data_reformat |> 
+  filter(str_detect(sub_category, "sufficient and qualified")) #find the sufficient and qualified row, nrow will be 0 if they are not combined 
+
+#if they are in one category mark them to be split by changing the reformat_key to split 
+if (nrow(split > 0)) {
+  sub_category_tab <- sub_category_tab |>
+    mutate(
+    reformat_key = case_when(str_detect(final_name, "Staff Numbers") ~ "split",
+str_detect(final_name, 'Staff Qualifications') ~"split",
+TRUE ~ reformat_key))
+}
+
+#when reformat key is split in the lookup table, the score will be duplicated to give a value for the two final category 
+#use fuzzy join to match categories that are split into two, fuzzy join looks for the best match between the lookup table and the data in sub_category column 
+split <- fuzzyjoin::stringdist_join( 
+  x = data_reformat, #reformatted data 
+  y = sub_category_tab, #lookup table
+  by = "sub_category", #joining on sub-category
+  ignore_case = TRUE, #not case sensitive
+  max_dist = 1,
+  mode = "left", #left join
+  method = "jw", #method of matching how closely related the two strings are
+  distance_col = 'dist' #make a column for a numeric representation of how related the string are
+  ) |> group_by(sub_category.x) |> #group based on the sub category in reformatted data
+  slice_min(order_by = dist, n =2, with_ties = FALSE) |> #keep the top-two best matches for each sub-category
+  filter(reformat_key == "split") |> #only keep the rows where the sub_category needs to be duplicated
+  ungroup() |>
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select columns 
+
+#repeating the process for sub_categories that are combined into one and need to be averaged in later years
+average <- fuzzyjoin::stringdist_join(
+  x = data_reformat, 
+  y = sub_category_tab, 
+  by = "sub_category",
+  ignore_case = TRUE,
+  max_dist = 1,
+  mode = "left",
+  method = "jw",
+  distance_col = 'dist'
+  ) |>
+  group_by(final_name) |>
+  slice_min(order_by = dist, n =2, with_ties = FALSE) |>
+  filter(reformat_key == "average") |>
+  group_by(final_name) |> #group by the final category
+  summarize(year.x = first(year.x),
+            Final_Category = first(Final_Category), #keep one final_category since both are the same
+            indicator_type = first(indicator_type), #keep one indicator type since both are the same
+            score = round(mean(score),0), #average the two scores
+            country = first(country),
+            site = first(site), #keep one site since both are the same
+            comments = paste(comments, collapse=" "), #combine the comments from both sub_categories
+            entered_by = first(entered_by)) |> #keep one entered by since both are the same 
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select relevant columns 
+
+#match the rest of the sub_categories that are not duplicated or combined across years to the correct final sub_category  
+main_match <- fuzzyjoin::stringdist_join(
+  x = data_reformat, 
+  y = sub_category_tab, 
+  by = "sub_category",
+  ignore_case = TRUE,
+  max_dist = 99,
+  mode = "left",
+  method = "jw",
+  distance_col = 'dist'
+  ) |> group_by(sub_category.x) |> 
+  slice_min(order_by = dist, n =1, with_ties = FALSE) |>
+  ungroup() |>
+  filter(reformat_key == "none") |> #filter for those with no special reformat key 
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name)
+
+#combine data and rename columns 
+final_data <- rbind(main_match,split, average)
+
+final_data <-final_data |> select(year = year.x, category = Final_Category, sub_category = final_name, indicator_type, score, country, site, comments, entered_by)
+
+output <<- final_data
+  assign("final_data", output, envir = .GlobalEnv) #output final_data to the environment
+}
+
+```
+
+# Testing the function
+This section is to test individual files using the function, and ensure it is outputting the expected data. This section can be deleted once the reformatted data is finalized.The reformatted data is saved as final_data in the environment after the function is run.  
+
+```{r}
+
+file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[4]), sheet = 1) #read the cells of each file
+format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[4])) #read the format of each file
+
+file_name <- as.character(file_list[4])
+```
+
+
+#Reformat all the files 
+This section creates a for loop which will read all the files in the file list above as both xlsx cells and xlsx formats. It runs each file in the list through the previously created function and adds the reformatted data to a list. Since impact indicator data is stored in a second sheet in some of the files, a second loop is run pulling and reformatting the data from the second when this is the case. This data is added to a second list. Once all files have been reformatted in the file list, reformatted files are added to one data frame and saved as MPS_tracker_data. 
+
+```{r}
+
+data_list <- list() #make a blank list for 1st tab data
+data_list_impact <- list() #make a blank list to add data from the second tab to 
+
+
+for (i in seq_along(file_list)) {
+  file <- xlsx_cells(file.path(data_path, "raw", file_list[i]), sheet = 1) #read the cells of each file
+  format <- xlsx_formats(file.path(data_path, "raw", file_list[i])) #read the format of each file
+  character_name <-as.character(file_list[i]) #read the name of each file
+  reformat_function(file, format, character_name) #use reformat function to reformat
+  #add final dataframe to the list
+  data_list[[i]] <- final_data 
+}
+
+#for loop for when Impact data is stored on a second tab
+j <- 0 #number to identify where in the list to add the data
+for (i in seq_along(file_list)) {
+  if (length(xlsx_sheet_names(file.path(data_path, "raw", file_list[i]))) >1) { #if there is more than one sheet/tab
+  if ((xlsx_sheet_names(file.path(data_path, "raw", file_list[i]))[2]) == "Impact") #and if the second tab is named impact
+  {
+    j <- j +1 #increase the position in the list each time new data will be added 
+    file <- xlsx_cells(file.path(data_path, "raw", file_list[i]), sheet = 2) #read the cells of the second sheet
+  format <- xlsx_formats(file.path(data_path, "raw", file_list[i])) #read the format of each file
+  character_name <-as.character(file_list[i]) #read the name of each file
+  
+  reformat_function(file, format, character_name) #use reformat function to reformat
+  
+  data_list_impact[[j]] <- final_data #add the new dataframe to a list
+  }
+  }
+}
+
+
+df <- do.call("rbind",data_list)  #save everything in the data_list as one data frame
+df2 <- do.call("rbind",data_list_impact) #save everything in the data_list_impact as one data frame
+
+MPS_tracker_data <- rbind(df,df2) #combine both data frames 
+
+```
+
+# Save the Data as a google sheet
+
+let's do a quick test first to see what we can do: 
+```{r}
+# test it out --------------
+# just running this line creates a spreadsheet with a unique name that's really funny! "unpleasant-buffalo"
+MPS_sheet <- write_sheet(data = MPS_tracker_data, # give it a data.frame object 
+                         sheet = "test-mps")      # this argument specifies the sheet name, not file name
+##### NA columns just get stored as 'blank'
+#####--- our MPS_tracker_data data.frame file started with 316 rows and the google sheet has 317 rows ... this is because the data.frame object does not include the column names as a row, but the google sheet does 
+
+# control file name - initialize sheet --------------------  
+# ok I want to control what that file is called... this means i have to use the 'gs4_create()' function
+# call this function first to initialize a google sheet and then use write_sheet to add data to it
+test_gs4_sheet <- gs4_create("file_name", 
+                             sheets = "sheet_name")
+
+# try moving the spreadsheet ----------------------- 
+# I am moving this file called "file name" into arbitary file in our shared google drive: "iMPAct_drive/data/write_to_here_gs4"
+# ok now it's moved so let's add our data to it 
+
+# write our data to the sheet in correct position within drive ------------------------ 
+write_sheet(data = MPS_tracker_data,
+            ss = test_gs4_sheet,
+            sheet = "sheet_name")
+# alright! I checked that file in our google drive and our data is there! yay :)
+
+# let's move this test df we made to the trash --------------------
+googledrive::drive_trash(test_gs4_sheet) # boom! this file is now in my trash folder 
+```
+
+Ok now that we have tested things out with googlesheet4 let's make a final spreadsheet where all the data is going to live and be pulled from for our Shiny apps 
+
+```{r}
+MPS_final_sheet <- gs4_create("compiled_MPS")
+write_sheet(data = MPS_tracker_data,
+            ss = MPS_final_sheet, 
+            sheet = "Sheet1")
+# OK now we're ready to pull from this sheet! 
+```
+
