@@ -170,7 +170,7 @@ data_reformat <- enhead(data_cells,indicator_type, "up-left") |> #create the ind
 
 column_names <- as.data.frame(names(data_reformat)) |> filter(names(data_reformat) == "comments")
 
-if (length(column_names) <1) {
+if (nrow(column_names) <1) {
   data_reformat <- data_reformat |> mutate(comments = NA)
 }
 
