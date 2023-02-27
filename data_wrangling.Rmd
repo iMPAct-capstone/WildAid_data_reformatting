@@ -21,26 +21,27 @@ library(googlesheets4)
 source(file.path(here::here(),"src/paths.R")) #file paths
 ```
 
-
-
 # List all the files
-This lists all the files that will be reformatted. In order for files to be reformatted they must all be stored within one folder and named in the format "country_site_year.xslx" eg "ecuador_elmorro_2022.xlsx". If no site name exists, country must currently be listed twice eg (gabon_gabon_2020.xslx) until we determine if the data was collected EEZ wide. To change the Google Drive folder that data is being pulled from, change the data path within the paths.R file in the src folder. 
+
+This lists all the files that will be reformatted. In order for files to be reformatted they must all be stored within one folder and named in the format "country_site_year.xslx" eg "ecuador_elmorro_2022.xlsx". If no site name exists, country must currently be listed twice eg (gabon_gabon_2020.xslx) until we determine if the data was collected EEZ wide. To change the Google Drive folder that data is being pulled from, change the data path within the paths.R file in the src folder.
+
 ```{r}
 file_list <- list.files(path = (file.path(data_path, "raw"))) #list all the files in the raw data folder
 ```
 
 # Make a Function to reformat the data
-This section creates a function that takes the old MPS tracker data and converts it to a tidy machine readable format which is consistent across years. The input for the function includes file_cells (must be an xlsx spreadsheet read in use the xlsx_cells function) the format (must be the same xlsx spreadsheet read in using the xlsx_formats) and the name of the file (must be a character string). 
 
-The first half of the function re-formats the excel spreadsheet into a tidy data format, and adds new columns including year, site name and evaluator. It also removes scoring status criteria which will be listed in metadata. The data under categories is renamed to "sub-category", while the headers for each of the sections are named category. For example the category "Vessel Availability" in the old version is listed under the sub_category column in the new version, this was under the "Surveillance and Enforcement" header which is now in the category column. 
+This section creates a function that takes the old MPS tracker data and converts it to a tidy machine readable format which is consistent across years. The input for the function includes file_cells (must be an xlsx spreadsheet read in use the xlsx_cells function) the format (must be the same xlsx spreadsheet read in using the xlsx_formats) and the name of the file (must be a character string).
+
+The first half of the function re-formats the excel spreadsheet into a tidy data format, and adds new columns including year, site name and evaluator. It also removes scoring status criteria which will be listed in metadata. The data under categories is renamed to "sub-category", while the headers for each of the sections are named category. For example the category "Vessel Availability" in the old version is listed under the sub_category column in the new version, this was under the "Surveillance and Enforcement" header which is now in the category column.
 
 The second half of the function modifies sub_categories in the reformatted data to be consistent with the latest(2022) version of the MPS tracker across years. It also involves converting the text in each sub_category to the final name of the sub_category. Final names for sub_categories are based on the names in the 2022 version of the MPS tracker. For example the 2020 sub-category, "MPA has access to various sources of intelligence information for illegal activities", is reworded as "Intelligence Sources" across all years.
 
-When a sub-category is removed entirely in the 2022 version of the tracker, the score is maintained and the sub_category is renamed to a shortened version. For example the sub_category, "A decrease in the number of indirectly caught (e.g. by long lines, gill nets, etc.) protected species" was removed from the tracker after 2020. The score for this category is maintained for years when it was collected and the sub_category is renamed "Decreased Bycatch" 
+When a sub-category is removed entirely in the 2022 version of the tracker, the score is maintained and the sub_category is renamed to a shortened version. For example the sub_category, "A decrease in the number of indirectly caught (e.g. by long lines, gill nets, etc.) protected species" was removed from the tracker after 2020. The score for this category is maintained for years when it was collected and the sub_category is renamed "Decreased Bycatch"
 
-When two sub-categories are combined in the 2022 version of the tracker, the score is averaged and combined into the final category. For example the 2021 version of the tracker has sub_categories tilted "Management Laws" and "Fishing Regulations". The both are in one sub_category "Laws and Regulations" in the 2022 version of the tracker. In the reformatted data, the two scores for these sub_categories in 2021 are averaged and combined into the "Laws and Regulations" sub_category. The comments from both sub_categories are combined. 
+When two sub-categories are combined in the 2022 version of the tracker, the score is averaged and combined into the final category. For example the 2021 version of the tracker has sub_categories tilted "Management Laws" and "Fishing Regulations". The both are in one sub_category "Laws and Regulations" in the 2022 version of the tracker. In the reformatted data, the two scores for these sub_categories in 2021 are averaged and combined into the "Laws and Regulations" sub_category. The comments from both sub_categories are combined.
 
-When one sub-category is split into two categories in the 2022 version of the tracker, the score from earlier years of data is duplicated to provide a value for both final sub-categories. For example the sub_category  "Public institutions - Coast Guard/ Navy, Park Wardens, MPA Managers, Central Govt Reps (defense, environment, tourism, fishing/ aquaculture), local government reps collaborate on enforcement and have the resources/ will for enforcement." is split into "National Institutional Collaboration" and "International Institutional Collaboration" in the 2022 version of the tracker. The scores from the earlier version are duplicated so that both final categories have a score across all years where data was collected. 
+When one sub-category is split into two categories in the 2022 version of the tracker, the score from earlier years of data is duplicated to provide a value for both final sub-categories. For example the sub_category "Public institutions - Coast Guard/ Navy, Park Wardens, MPA Managers, Central Govt Reps (defense, environment, tourism, fishing/ aquaculture), local government reps collaborate on enforcement and have the resources/ will for enforcement." is split into "National Institutional Collaboration" and "International Institutional Collaboration" in the 2022 version of the tracker. The scores from the earlier version are duplicated so that both final categories have a score across all years where data was collected.
 
 ```{r}
 reformat_function <- function(file_cells, format_cells, file_name){
@@ -273,7 +274,8 @@ output <<- final_data
 ```
 
 # Testing the function
-This section is to test individual files using the function, and ensure it is outputting the expected data. This section can be deleted once the reformatted data is finalized.The reformatted data is saved as final_data in the environment after the function is run.  
+
+This section is to test individual files using the function, and ensure it is outputting the expected data. This section can be deleted once the reformatted data is finalized.The reformatted data is saved as final_data in the environment after the function is run.
 
 ```{r}
 
@@ -283,9 +285,7 @@ format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[4])) #read th
 file_name <- as.character(file_list[4])
 ```
 
-
-#Reformat all the files 
-This section creates a for loop which will read all the files in the file list above as both xlsx cells and xlsx formats. It runs each file in the list through the previously created function and adds the reformatted data to a list. Since impact indicator data is stored in a second sheet in some of the files, a second loop is run pulling and reformatting the data from the second when this is the case. This data is added to a second list. Once all files have been reformatted in the file list, reformatted files are added to one data frame and saved as MPS_tracker_data. 
+#Reformat all the files This section creates a for loop which will read all the files in the file list above as both xlsx cells and xlsx formats. It runs each file in the list through the previously created function and adds the reformatted data to a list. Since impact indicator data is stored in a second sheet in some of the files, a second loop is run pulling and reformatting the data from the second when this is the case. This data is added to a second list. Once all files have been reformatted in the file list, reformatted files are added to one data frame and saved as MPS_tracker_data.
 
 ```{r}
 
@@ -325,12 +325,21 @@ df <- do.call("rbind",data_list)  #save everything in the data_list as one data 
 df2 <- do.call("rbind",data_list_impact) #save everything in the data_list_impact as one data frame
 
 MPS_tracker_data <- rbind(df,df2) #combine both data frames 
-
 ```
 
-# Save the Data as a google sheet
+#Update the Site Names This section reads a lookup table with the shortened site names used in the files and the full name of the site. It converts the site name to the full name and reformats the country name to have spaces when needed.
 
-let's do a quick test first to see what we can do: 
+```{r}
+site_list <- read_excel(file.path(data_path, "tables", "site_list.xlsx")) #read list of reformatted site names 
+
+
+MPS_tracker_data <- left_join(MPS_tracker_data, site_list, by = c("site", "country")) |> select(year, category, sub_category, indicator_type, score, country = country_final, site = extended_name, comments, entered_by) 
+```
+
+# Save the Data as a Google Sheet
+
+let's do a quick test first to see what we can do:
+
 ```{r}
 # test it out --------------
 # just running this line creates a spreadsheet with a unique name that's really funny! "unpleasant-buffalo"
@@ -359,7 +368,7 @@ write_sheet(data = MPS_tracker_data,
 googledrive::drive_trash(test_gs4_sheet) # boom! this file is now in my trash folder 
 ```
 
-Ok now that we have tested things out with googlesheet4 let's make a final spreadsheet where all the data is going to live and be pulled from for our Shiny apps 
+Ok now that we have tested things out with googlesheet4 let's make a final spreadsheet where all the data is going to live and be pulled from for our Shiny apps. **Only run this code if this is the first time you are creating the Google Sheet.**
 
 ```{r}
 MPS_final_sheet <- gs4_create("compiled_MPS")
@@ -369,4 +378,10 @@ write_sheet(data = MPS_tracker_data,
 # OK now we're ready to pull from this sheet! 
 ```
 
+Once the above sheet has already been created and we want to overwrite it with the data we just made uncomment and run the code below. **Warning: Do not run this code if you do not want to entirely overwrite the existing Google Sheet with whatever is contained in the MPS_tracker_data object.**
 
+```{r}
+#write_sheet(data = MPS_tracker_data,
+           # ss = "15o7DB_kqLc_PbsRkBC9cGjVYd5pGeAJyMrM0TWRUGF8", 
+            #sheet = "Sheet1")
+```
