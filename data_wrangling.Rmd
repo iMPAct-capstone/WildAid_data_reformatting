@@ -327,7 +327,9 @@ df2 <- do.call("rbind",data_list_impact) #save everything in the data_list_impac
 MPS_tracker_data <- rbind(df,df2) #combine both data frames 
 ```
 
-#Update the Site Names This section reads a lookup table with the shortened site names used in the files and the full name of the site. It converts the site name to the full name and reformats the country name to have spaces when needed.
+# Update the Site Names 
+
+This section reads a lookup table with the shortened site names used in the files and the full name of the site. It converts the site name to the full name and reformats the country name to have spaces when needed.
 
 ```{r}
 site_list <- read_excel(file.path(data_path, "tables", "site_list.xlsx")) #read list of reformatted site names 
