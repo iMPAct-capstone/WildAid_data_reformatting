@@ -206,6 +206,245 @@ TRUE ~ reformat_key))
 
 #when reformat key is split in the lookup table, the score will be duplicated to give a value for the two final category 
 #use fuzzy join to match categories that are split into two, fuzzy join looks for the best match between the lookup table and the data in sub_category column 
+split <- fuzzyjoin::regex_left_join( 
+  x = data_reformat, #reformatted data 
+  y = sub_category_tab, #lookup table
+  by = "sub_category", #joining on sub-category
+  ignore_case = TRUE  #make a column for a numeric representation of how related the string are
+  ) |> group_by(sub_category.x) |> #group based on the sub category in reformatted data
+  slice_min(order_by = dist, n =2, with_ties = FALSE) |> #keep the top-two best matches for each sub-category
+  filter(reformat_key == "split") |> #only keep the rows where the sub_category needs to be duplicated
+  ungroup() |>
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select columns 
+
+#repeating the process for sub_categories that are combined into one and need to be averaged in later years
+average <- fuzzyjoin::regex_left_join(
+  x = data_reformat, 
+  y = sub_category_tab, 
+  by = "sub_category",
+  ignore_case = TRUE,
+  max_dist = 1,
+  mode = "left",
+  method = "jw",
+  distance_col = 'dist'
+  ) |>
+  group_by(final_name) |>
+  slice_min(order_by = dist, n =2, with_ties = FALSE) |>
+  filter(reformat_key == "average") |>
+  group_by(final_name) |> #group by the final category
+  summarize(year.x = first(year.x),
+            Final_Category = first(Final_Category), #keep one final_category since both are the same
+            indicator_type = first(indicator_type), #keep one indicator type since both are the same
+            score = round(mean(score),0), #average the two scores
+            country = first(country),
+            site = first(site), #keep one site since both are the same
+            comments = paste(comments, collapse=" "), #combine the comments from both sub_categories
+            entered_by = first(entered_by)) |> #keep one entered by since both are the same 
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select relevant columns 
+
+#match the rest of the sub_categories that are not duplicated or combined across years to the correct final sub_category  
+main_match <- fuzzyjoin::reg(
+  x = data_reformat, 
+  y = sub_category_tab, 
+  by = "sub_category",
+  ignore_case = TRUE,
+  max_dist = 99,
+  mode = "left",
+  method = "jw",
+  distance_col = 'dist'
+  ) |> group_by(sub_category.x) |> 
+  slice_min(order_by = dist, n =1, with_ties = FALSE) |>
+  ungroup() |>
+  filter(reformat_key == "none") |> #filter for those with no special reformat key 
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name)
+
+#combine data and rename columns 
+final_data <- rbind(main_match,split, average)
+
+final_data <-final_data |> select(year = year.x, category = Final_Category, sub_category = final_name, indicator_type, score, country, site, comments, entered_by)
+
+output <<- final_data
+  assign("final_data", output, envir = .GlobalEnv) #output final_data to the environment
+}
+
+```
+
+# Testing the function
+
+This section is to test individual files using the function, and ensure it is outputting the expected data. This section can be deleted once the reformatted data is finalized.The reformatted data is saved as final_data in the environment after the function is run.
+
+```{r}
+
+file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[7]), sheet = 1) #read the cells of each file
+format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[7])) #read the format of each file
+file_name <- as.character(file_list[7])
+
+
+#break the file name into country, site and year 
+name <- as.character(file_name) |> str_remove(".xlsx") #make sure the file name is a character vector and remove the file extension
+#find the country
+country <- strsplit(name, '_', fixed = TRUE)[[1]][1] #split the file name based on _ and take the first element (country)
+#find the site 
+site <- strsplit(name, '_', fixed = TRUE)[[1]][2] #split the file name based on _ and take the 2nd element (site)
+#find the year
+year <- strsplit(name, '_', fixed = TRUE)[[1]][3] #split the file name based on _ and take the 3rd element (year)
+year1 <- year #save the year as a different name for later use in the function 
+  
+#find the person who entered data if available or set as NA
+evaluate_row <- file_cells |> 
+  filter(str_detect(character, "Evaluator") & row < 8 | str_detect(character, "Evaluadores")) #check if there is there is an evaluator section in the data, if not found this will be 0 rows long if found it will be 1 
+
+
+if (nrow(evaluate_row) >0) { #check if evaluator was found in evaluate_row, resulting in length >0 
+evaluate_location <- file_cells |>
+  filter(
+  row == evaluate_row$row & col == evaluate_row$col + 1) #find the spot where the name of the evaluator was found (should be one column over from "evaluator text")
+
+evaluator <- evaluate_location$character #save the name(s) of the evaluator
+} else {
+  evaluator <- NA #if no evaluator was found, set evaluator as NA
+}
+
+#begin reformatting the excel spreadsheet
+
+
+file_cells <- file_cells |> select(row, col, is_blank, data_type, character, numeric, local_format_id) #select only relevant columns
+
+#find the start of the data
+start <- file_cells |> 
+  filter(str_detect(character, "Category")| str_detect(character, "Categoría")) #the first row is always category
+
+#some impact indicator sheets do no have the category/header row, this creates the row if it does not exist
+if (nrow(start) == 0) { 
+  start <-  tibble(row = 5, col = 1, header = 'sub_category')
+  headers <- tibble(row = c(5,5, 5, 5), col = c(1,2,3,4), header = c('sub_category', 'score', 'scoring_criteria', 'comments'))
+}
+
+#find the end of the data, it is always before the Total Score Section 
+end <- file_cells |> filter(str_detect(character, "Total Score")) #
+
+file_cells <- file_cells |> filter(row >= start$row & row < end$row) #filter xlsx cells to be between the start and end of the data 
+
+#looking up the formats based on the format cells file
+
+bold <- format_cells$local$font$bold #find all bold fonts
+
+fill_colour <- format_cells$local$fill$patternFill$fgColor$rgb #find all cells with color
+
+#add information on the format (color and bolding) of the data to the file with the data
+file_cells <- file_cells |>
+  mutate(bold = bold[local_format_id],
+         filled = fill_colour[local_format_id]) |> 
+  filter (is_blank == FALSE) #remove blank cells
+
+#identify indicator types 
+indicator_type <- file_cells |>
+  filter(filled == 'FF9CC2E5' |
+           (str_detect(character, "PROCESS INDICATORS") |
+              str_detect(character, 'INDICADORES DE PROCESO') |
+              str_detect(character, "IMPACT INDICATORS") |
+              str_detect(character, 'INDICADORES DEL PROCESO'))) |> #find indicator type through either the font color or the text 
+  select(row,col, indicator_type = character) |> #save relevant columns 
+  mutate(indicator_type = case_when(
+    str_detect(indicator_type, "PROCESO") ~ 'Process Indicators',
+    str_detect(indicator_type, "Process") ~ "Process Indicators",
+    str_detect(indicator_type,"PROCESS") ~ "Process Indicators",
+    str_detect(indicator_type, "IMPACT") ~ "Impact Indicators",
+    str_detect(indicator_type, "Impact") ~ "Impact Indicators",
+    TRUE ~ indicator_type
+  ))  #if indicator type is in Spanish, change it to English 
+
+#indicator types to remove
+indicator_type_remove <- file_cells |>
+  filter(filled == 'FF9CC2E5' | (str_detect(character, "PROCESS INDICATORS") | str_detect(character, 'INDICADORES DE PROCESO') |
+                                   str_detect(character, "IMPACT INDICATORS") | str_detect(character, 'INDICADORES DEL PROCESO'))) |> #find indicator type through either the font color or the text 
+  select(row,col, indicator_type = character)
+
+
+#identify the categories 
+category <- file_cells |>
+  filter(filled %in% c('FF5B9BD5', 'FFDEEAF6') & !character %in% indicator_type_remove$indicator_type) |> #find everything with the two possible blue font colors for category and remove any indicator type cells 
+  select(row,col, category = character)
+
+#identify the headers
+header_cells <- file_cells |> 
+  filter(filled == 'FFE7E6E6') |> #all header cells are filled with grey 
+  select(row,col, header = character) |> 
+  mutate(header = case_when( #change names of headers for consistency 
+    str_detect(header, 'Categoría') ~ "sub_category", #name all categories as sub_category
+    str_detect(header, 'Category') ~ "sub_category", #name all categories as sub_category
+    str_detect(header, 'Estado 1-5') ~ "score", #rename as score
+    str_detect(header, '1-5') ~ "score", #rename as score
+    str_detect(header, 'Notas') ~ "comments" , #rename notes to comments
+    str_detect(header, 'Notes') ~ "comments" , #rename notes to comments
+    str_detect(header, 'Comentarios Sobre') ~ "comments", #change spanish to english
+    TRUE ~ header) #if no changes made then keep the original header
+    
+    )
+
+if (nrow(header_cells) == 0) {
+  header_cells <- headers
+} #if no header cells were found then use the tibble we made earlier as the header cells
+
+#find only the data 
+data_cells <- file_cells |>
+  filter(!row ==1) |> #data is never in the first row
+  filter(data_type %in% c("character","numeric")) |> #only character and numeric data 
+  filter(!filled %in% c('FF9CC2E5','FFDEEAF6','FFE7E6E6', 'FF5B9BD5')) |> #data is never filled with any of these colors 
+  select(row,col,character,numeric,data_type) #select relevant columns 
+
+data_reformat <- enhead(data_cells,indicator_type, "up-left") |> #create the indicator type column
+  enhead(category, "up-left") |> #create the sub-category column
+  enhead(header_cells, "up") |> #add all of the headers
+  select(-col) |> #remove col
+  spatter(key = header) |> #spread the data so that each header becomea a colum 
+  filter(!is.na(sub_category)) |> #remove any duplicate cells with NA 
+  mutate(year = year, site = site, country = country, entered_by = evaluator) |> #add year, site and entered by columns
+  ungroup() 
+
+column_names <- as.data.frame(names(data_reformat)) |> filter(names(data_reformat) == "comments")
+
+if (nrow(column_names) <1) {
+  data_reformat <- data_reformat |> mutate(comments = NA)
+}
+
+ data_reformat <- data_reformat |>  select(year, category, sub_category,
+         indicator_type,
+         score, site, country, entered_by, comments) #select and rename columns 
+#initial reformatting of the data into tidy format is complete 
+#Section 2 change the reformatted data to match the final MPS tracker version 
+
+source(file.path(here::here(),"src/subcategory_lookup_table.R")) #pull the table to lookup correct subcategories
+
+sub_category_tab <- sub_category_table |>
+  select(-indicator_type) |>
+  mutate(year = as.numeric(year)) |>
+  filter(year == year1) #filter for the year of data we are using, important so that the correct year from the lookup table is used 
+
+
+
+sub_category_tab <- as_tibble(sub_category_tab) #make into a tibble
+
+#determine if staff sufficient and qualified is separate or in one category in this spreadsheet, if separate leave as is 
+
+split <- data_reformat |> 
+  filter(str_detect(sub_category, "sufficient and qualified")) #find the sufficient and qualified row, nrow will be 0 if they are not combined 
+
+#if they are in one category mark them to be split by changing the reformat_key to split 
+if (nrow(split > 0)) {
+  sub_category_tab <- sub_category_tab |>
+    mutate(
+    reformat_key = case_when(str_detect(final_name, "Staff Numbers") ~ "split",
+str_detect(final_name, 'Staff Qualifications') ~"split",
+TRUE ~ reformat_key))
+}
+
+if (year == 2019 & site == "Galapagos") {
+problem <- fuzzyjoin::stringdist_join(str_detect(data_reformat, "case_database"), )
+}
+
+#when reformat key is split in the lookup table, the score will be duplicated to give a value for the two final category 
+#use fuzzy join to match categories that are split into two, fuzzy join looks for the best match between the lookup table and the data in sub_category column 
 split <- fuzzyjoin::stringdist_join( 
   x = data_reformat, #reformatted data 
   y = sub_category_tab, #lookup table
@@ -269,20 +508,7 @@ final_data <-final_data |> select(year = year.x, category = Final_Category, sub_
 
 output <<- final_data
   assign("final_data", output, envir = .GlobalEnv) #output final_data to the environment
-}
 
-```
-
-# Testing the function
-
-This section is to test individual files using the function, and ensure it is outputting the expected data. This section can be deleted once the reformatted data is finalized.The reformatted data is saved as final_data in the environment after the function is run.
-
-```{r}
-
-file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[4]), sheet = 1) #read the cells of each file
-format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[4])) #read the format of each file
-
-file_name <- as.character(file_list[4])
 ```
 
 #Reformat all the files This section creates a for loop which will read all the files in the file list above as both xlsx cells and xlsx formats. It runs each file in the list through the previously created function and adds the reformatted data to a list. Since impact indicator data is stored in a second sheet in some of the files, a second loop is run pulling and reformatting the data from the second when this is the case. This data is added to a second list. Once all files have been reformatted in the file list, reformatted files are added to one data frame and saved as MPS_tracker_data.
@@ -327,7 +553,7 @@ df2 <- do.call("rbind",data_list_impact) #save everything in the data_list_impac
 MPS_tracker_data <- rbind(df,df2) #combine both data frames 
 ```
 
-# Update the Site Names 
+# Update the Site Names
 
 This section reads a lookup table with the shortened site names used in the files and the full name of the site. It converts the site name to the full name and reformats the country name to have spaces when needed.
 
@@ -383,7 +609,7 @@ write_sheet(data = MPS_tracker_data,
 Once the above sheet has already been created and we want to overwrite it with the data we just made uncomment and run the code below. **Warning: Do not run this code if you do not want to entirely overwrite the existing Google Sheet with whatever is contained in the MPS_tracker_data object.**
 
 ```{r}
-#write_sheet(data = MPS_tracker_data,
-           #ss = "1cUz4WZ1CRHFicuVUt82kJ_mL9Ur861Dn1c0BYu3NmRY", 
-           # sheet = "Sheet1")
+write_sheet(data = MPS_tracker_data,
+           ss = "1cUz4WZ1CRHFicuVUt82kJ_mL9Ur861Dn1c0BYu3NmRY", 
+            sheet = "Sheet1")
 ```
