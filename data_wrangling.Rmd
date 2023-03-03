@@ -206,19 +206,22 @@ TRUE ~ reformat_key))
 
 #when reformat key is split in the lookup table, the score will be duplicated to give a value for the two final category 
 #use fuzzy join to match categories that are split into two, fuzzy join looks for the best match between the lookup table and the data in sub_category column 
-split <- fuzzyjoin::regex_left_join( 
+split <- fuzzyjoin::stringdist_join( 
   x = data_reformat, #reformatted data 
   y = sub_category_tab, #lookup table
   by = "sub_category", #joining on sub-category
-  ignore_case = TRUE  #make a column for a numeric representation of how related the string are
+  ignore_case = TRUE, #not case sensitive
+  max_dist = 1,
+  mode = "left", #left join
+  method = 'osa', #method of matching how closely related the two strings are
+  distance_col = 'dist' #make a column for a numeric representation of how related the string are
   ) |> group_by(sub_category.x) |> #group based on the sub category in reformatted data
   slice_min(order_by = dist, n =2, with_ties = FALSE) |> #keep the top-two best matches for each sub-category
   filter(reformat_key == "split") |> #only keep the rows where the sub_category needs to be duplicated
   ungroup() |>
   select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select columns 
 
-#repeating the process for sub_categories that are combined into one and need to be averaged in later years
-average <- fuzzyjoin::regex_left_join(
+average <- fuzzyjoin::stringdist_join(
   x = data_reformat, 
   y = sub_category_tab, 
   by = "sub_category",
@@ -242,26 +245,64 @@ average <- fuzzyjoin::regex_left_join(
             entered_by = first(entered_by)) |> #keep one entered by since both are the same 
   select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select relevant columns 
 
+average_search <- data_reformat |> 
+  filter(str_detect(sub_category, "Fishing Regulations") | str_detect(sub_category, "Management Laws")) #find the sufficient and qualified row, nrow will be 0 if they are not combined 
+
+#if they are in one category mark them to be averaged by changing the reformat_key to average
+if (nrow(average_search > 1) & !year == 2021) {
+  sub_category_table <- sub_category_table |> select(-indicator_type) |>
+  mutate(year = as.numeric(year)) |> 
+    filter(year == 2021)
+  
+average <- fuzzyjoin::stringdist_join(
+  x = data_reformat, 
+  y = sub_category_table, 
+  by = "sub_category",
+  ignore_case = TRUE,
+  max_dist = 1,
+  mode = "left",
+  method = "jw",
+  distance_col = 'dist'
+  ) |>
+  group_by(final_name) |>
+  slice_min(order_by = dist, n =2, with_ties = FALSE) |>
+  filter(reformat_key == "average") |>
+  group_by(final_name) |> #group by the final category
+  summarize(year.x = first(year.x),
+            Final_Category = first(Final_Category), #keep one final_category since both are the same
+            indicator_type = first(indicator_type), #keep one indicator type since both are the same
+            score = round(mean(score),0), #average the two scores
+            country = first(country),
+            site = first(site), #keep one site since both are the same
+            comments = paste(comments, collapse=" "), #combine the comments from both sub_categories
+            entered_by = first(entered_by)) |> #keep one entered by since both are the same 
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select relevant columns   
+
+}
+
+average_list <- average_search$sub_category
+
 #match the rest of the sub_categories that are not duplicated or combined across years to the correct final sub_category  
-main_match <- fuzzyjoin::reg(
+main_match <- fuzzyjoin::stringdist_join(
   x = data_reformat, 
   y = sub_category_tab, 
   by = "sub_category",
   ignore_case = TRUE,
   max_dist = 99,
   mode = "left",
-  method = "jw",
+  method = "osa",
   distance_col = 'dist'
   ) |> group_by(sub_category.x) |> 
   slice_min(order_by = dist, n =1, with_ties = FALSE) |>
   ungroup() |>
-  filter(reformat_key == "none") |> #filter for those with no special reformat key 
+  filter(reformat_key == "none") |>#filter for those with no special reformat key 
+  filter(!sub_category.x %in% average_list) |> 
   select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name)
 
 #combine data and rename columns 
 final_data <- rbind(main_match,split, average)
 
-final_data <-final_data |> select(year = year.x, category = Final_Category, sub_category = final_name, indicator_type, score, country, site, comments, entered_by)
+final_data <-final_data |> select(year = year.x, category = Final_Category, sub_category = final_name, indicator_type, score, country, site, comments, entered_by) |> mutate(score = as.numeric(score))
 
 output <<- final_data
   assign("final_data", output, envir = .GlobalEnv) #output final_data to the environment
@@ -275,10 +316,11 @@ This section is to test individual files using the function, and ensure it is ou
 
 ```{r}
 
-file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[7]), sheet = 1) #read the cells of each file
-format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[7])) #read the format of each file
-file_name <- as.character(file_list[7])
+file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[1]), sheet = 1) #read the cells of each file
+format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[1])) #read the format of each file
+file_name <- as.character(file_list[1])
 
+reformat_function(file_cells, format_cells, file_name)
 
 #break the file name into country, site and year 
 name <- as.character(file_name) |> str_remove(".xlsx") #make sure the file name is a character vector and remove the file extension
@@ -400,7 +442,7 @@ data_reformat <- enhead(data_cells,indicator_type, "up-left") |> #create the ind
   spatter(key = header) |> #spread the data so that each header becomea a colum 
   filter(!is.na(sub_category)) |> #remove any duplicate cells with NA 
   mutate(year = year, site = site, country = country, entered_by = evaluator) |> #add year, site and entered by columns
-  ungroup() 
+  ungroup()
 
 column_names <- as.data.frame(names(data_reformat)) |> filter(names(data_reformat) == "comments")
 
@@ -419,9 +461,7 @@ source(file.path(here::here(),"src/subcategory_lookup_table.R")) #pull the table
 sub_category_tab <- sub_category_table |>
   select(-indicator_type) |>
   mutate(year = as.numeric(year)) |>
-  filter(year == year1) #filter for the year of data we are using, important so that the correct year from the lookup table is used 
-
-
+  filter(year == year1)#filter for the year of data we are using, important so that the correct year from the lookup table is used 
 
 sub_category_tab <- as_tibble(sub_category_tab) #make into a tibble
 
@@ -439,10 +479,6 @@ str_detect(final_name, 'Staff Qualifications') ~"split",
 TRUE ~ reformat_key))
 }
 
-if (year == 2019 & site == "Galapagos") {
-problem <- fuzzyjoin::stringdist_join(str_detect(data_reformat, "case_database"), )
-}
-
 #when reformat key is split in the lookup table, the score will be duplicated to give a value for the two final category 
 #use fuzzy join to match categories that are split into two, fuzzy join looks for the best match between the lookup table and the data in sub_category column 
 split <- fuzzyjoin::stringdist_join( 
@@ -452,7 +488,7 @@ split <- fuzzyjoin::stringdist_join(
   ignore_case = TRUE, #not case sensitive
   max_dist = 1,
   mode = "left", #left join
-  method = "jw", #method of matching how closely related the two strings are
+  method = 'osa', #method of matching how closely related the two strings are
   distance_col = 'dist' #make a column for a numeric representation of how related the string are
   ) |> group_by(sub_category.x) |> #group based on the sub category in reformatted data
   slice_min(order_by = dist, n =2, with_ties = FALSE) |> #keep the top-two best matches for each sub-category
@@ -460,7 +496,6 @@ split <- fuzzyjoin::stringdist_join(
   ungroup() |>
   select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select columns 
 
-#repeating the process for sub_categories that are combined into one and need to be averaged in later years
 average <- fuzzyjoin::stringdist_join(
   x = data_reformat, 
   y = sub_category_tab, 
@@ -485,6 +520,43 @@ average <- fuzzyjoin::stringdist_join(
             entered_by = first(entered_by)) |> #keep one entered by since both are the same 
   select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select relevant columns 
 
+average_search <- data_reformat |> 
+  filter(str_detect(sub_category, "Fishing Regulations") | str_detect(sub_category, "Management Laws")) #find the sufficient and qualified row, nrow will be 0 if they are not combined 
+
+#if they are in one category mark them to be averaged by changing the reformat_key to average
+if (nrow(average_search > 1) & !year == 2021) {
+  sub_category_table <- sub_category_table |> select(-indicator_type) |>
+  mutate(year = as.numeric(year)) |> 
+    filter(year == 2021)
+  
+average <- fuzzyjoin::stringdist_join(
+  x = data_reformat, 
+  y = sub_category_table, 
+  by = "sub_category",
+  ignore_case = TRUE,
+  max_dist = 1,
+  mode = "left",
+  method = "jw",
+  distance_col = 'dist'
+  ) |>
+  group_by(final_name) |>
+  slice_min(order_by = dist, n =2, with_ties = FALSE) |>
+  filter(reformat_key == "average") |>
+  group_by(final_name) |> #group by the final category
+  summarize(year.x = first(year.x),
+            Final_Category = first(Final_Category), #keep one final_category since both are the same
+            indicator_type = first(indicator_type), #keep one indicator type since both are the same
+            score = round(mean(score),0), #average the two scores
+            country = first(country),
+            site = first(site), #keep one site since both are the same
+            comments = paste(comments, collapse=" "), #combine the comments from both sub_categories
+            entered_by = first(entered_by)) |> #keep one entered by since both are the same 
+  select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name) #select relevant columns   
+
+}
+
+average_list <- average_search$sub_category
+
 #match the rest of the sub_categories that are not duplicated or combined across years to the correct final sub_category  
 main_match <- fuzzyjoin::stringdist_join(
   x = data_reformat, 
@@ -493,12 +565,13 @@ main_match <- fuzzyjoin::stringdist_join(
   ignore_case = TRUE,
   max_dist = 99,
   mode = "left",
-  method = "jw",
+  method = "osa",
   distance_col = 'dist'
   ) |> group_by(sub_category.x) |> 
   slice_min(order_by = dist, n =1, with_ties = FALSE) |>
   ungroup() |>
-  filter(reformat_key == "none") |> #filter for those with no special reformat key 
+  filter(reformat_key == "none") |>#filter for those with no special reformat key 
+  filter(!sub_category.x %in% average_list) |> 
   select(year.x, indicator_type, score, site, country, entered_by, comments, Final_Category, final_name)
 
 #combine data and rename columns 
@@ -511,7 +584,9 @@ output <<- final_data
 
 ```
 
-#Reformat all the files This section creates a for loop which will read all the files in the file list above as both xlsx cells and xlsx formats. It runs each file in the list through the previously created function and adds the reformatted data to a list. Since impact indicator data is stored in a second sheet in some of the files, a second loop is run pulling and reformatting the data from the second when this is the case. This data is added to a second list. Once all files have been reformatted in the file list, reformatted files are added to one data frame and saved as MPS_tracker_data.
+# Reformat all the files 
+
+This section creates a for loop which will read all the files in the file list above as both xlsx cells and xlsx formats. It runs each file in the list through the previously created function and adds the reformatted data to a list. Since impact indicator data is stored in a second sheet in some of the files, a second loop is run pulling and reformatting the data from the second when this is the case. This data is added to a second list. Once all files have been reformatted in the file list, reformatted files are added to one data frame and saved as MPS_tracker_data.
 
 ```{r}
 
@@ -561,7 +636,14 @@ This section reads a lookup table with the shortened site names used in the file
 site_list <- read_excel(file.path(data_path, "tables", "site_list.xlsx")) #read list of reformatted site names 
 
 
-MPS_tracker_data <- left_join(MPS_tracker_data, site_list, by = c("site", "country")) |> select(year, category, sub_category, indicator_type, score, country = country_final, site = extended_name, comments, entered_by) 
+MPS_tracker_data <- left_join(MPS_tracker_data, site_list, by = c("site", "country")) |> select(year, category, sub_category, indicator_type, score, country = country_final, site = extended_name, comments, entered_by)
+```
+
+# Testing
+
+```{r}
+test <- MPS_tracker_data |> group_by(site, year, sub_category) |> 
+  summarize(sum(score), n=  n()) |> filter(n>1L)
 ```
 
 # Save the Data as a Google Sheet
