@@ -15,6 +15,7 @@ library(tidyverse)
 library(readxl)
 library(tidyxl)
 library(googlesheets4)
+library(testthat)
 #library(googledrive)
 
 
@@ -302,7 +303,7 @@ main_match <- fuzzyjoin::stringdist_join(
 #combine data and rename columns 
 final_data <- rbind(main_match,split, average)
 
-final_data <-final_data |> select(year = year.x, category = Final_Category, sub_category = final_name, indicator_type, score, country, site, comments, entered_by) |> mutate(score = as.numeric(score))
+final_data <-final_data |> select(year = year.x, category = Final_Category, sub_category = final_name, indicator_type, score, country, site, comments, entered_by) |> mutate(score = as.integer(score))
 
 output <<- final_data
   assign("final_data", output, envir = .GlobalEnv) #output final_data to the environment
@@ -584,7 +585,7 @@ output <<- final_data
 
 ```
 
-# Reformat all the files 
+# Reformat all the files
 
 This section creates a for loop which will read all the files in the file list above as both xlsx cells and xlsx formats. It runs each file in the list through the previously created function and adds the reformatted data to a list. Since impact indicator data is stored in a second sheet in some of the files, a second loop is run pulling and reformatting the data from the second when this is the case. This data is added to a second list. Once all files have been reformatted in the file list, reformatted files are added to one data frame and saved as MPS_tracker_data.
 
@@ -642,8 +643,9 @@ MPS_tracker_data <- left_join(MPS_tracker_data, site_list, by = c("site", "count
 # Testing
 
 ```{r}
-test <- MPS_tracker_data |> group_by(site, year, sub_category) |> 
-  summarize(sum(score), n=  n()) |> filter(n>1L)
+#run tests on main sheet before saving the data in google sheets
+source(file.path(here::here(),"src/tests.R")) 
+
 ```
 
 # Save the Data as a Google Sheet
