@@ -11,7 +11,7 @@ test_that("duplicate_subcategorires", {
 #make sure there are no incorrect sub_categories
 
 test_that("correct_categories", { expect_true(
-  all(MPS_tracker_data$category %in% c("Surveilance and Enforcement", "Community and Conservation Benefits", "Policies and Consequences", "Consistent Funding", "Community Engagement", "Training and Mentorship"))) })
+  all(MPS_tracker_data$category %in% c("Surveillance and Enforcement", "Community and Conservation Benefits", "Policies and Consequences", "Consistent Funding", "Community Engagement", "Training and Mentorship"))) })
 
 #make sure there are no incorrect indicator types
 test_that("correct_categories", { expect_true(
