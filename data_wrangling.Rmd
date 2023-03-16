@@ -204,6 +204,15 @@ if (nrow(split > 0)) {
 str_detect(final_name, 'Staff Qualifications') ~"split",
 TRUE ~ reformat_key))
 }
+collaboration_split <- data_reformat |> 
+  filter(str_detect(sub_category, "Collaboration")) |> filter(category == "Surveillance and Enforcement" ) #find the sufficient and qualified row, nrow will be 0 if they are not combined 
+  
+#if national and institutional collaboration are in one category mark them to be split by changing the reformat_key to split 
+if (nrow(collaboration_split < 2) & year == 2022) {
+  sub_category_tab <- sub_category_tab |>
+    mutate(reformat_key = case_when(sub_category == "Institutional Collaboration" ~ "split",
+TRUE ~ reformat_key))
+} 
 
 #when reformat key is split in the lookup table, the score will be duplicated to give a value for the two final category 
 #use fuzzy join to match categories that are split into two, fuzzy join looks for the best match between the lookup table and the data in sub_category column 
@@ -306,8 +315,9 @@ final_data <- rbind(main_match,split, average)
 final_data <-final_data |> select(year = year.x, category = Final_Category, sub_category = final_name, indicator_type, score, country, site, comments, entered_by) |> mutate(score = as.integer(score))
 
 output <<- final_data
-  assign("final_data", output, envir = .GlobalEnv) #output final_data to the environment
-}
+  assign("final_data", output, envir = .GlobalEnv)#output final_data to the environment
+source(file.path(here::here(),"src/individual_tests.R")) 
+  }
 
 ```
 
@@ -317,11 +327,11 @@ This section is to test individual files using the function, and ensure it is ou
 
 ```{r}
 
-file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[1]), sheet = 1) #read the cells of each file
-format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[1])) #read the format of each file
-file_name <- as.character(file_list[1])
+file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[10]), sheet = 1) #read the cells of each file
+format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[10])) #read the format of each file
+file_name <- as.character(file_list[10])
 
-reformat_function(file_cells, format_cells, file_name)
+#reformat_function(file_cells, format_cells, file_name)
 
 #break the file name into country, site and year 
 name <- as.character(file_name) |> str_remove(".xlsx") #make sure the file name is a character vector and remove the file extension
@@ -480,6 +490,17 @@ str_detect(final_name, 'Staff Qualifications') ~"split",
 TRUE ~ reformat_key))
 }
 
+collaboration_split <- data_reformat |> 
+  filter(str_detect(sub_category, "Collaboration")) |> filter(category == "Surveillance and Enforcement" ) #find the sufficient and qualified row, nrow will be 0 if they are not combined 
+  
+#if they are in one category mark them to be split by changing the reformat_key to split 
+if (nrow(collaboration_split < 2) & year == 2022) {
+  sub_category_tab <- sub_category_tab |>
+    mutate(reformat_key = case_when(sub_category == "Institutional Collaboration" ~ "split",
+TRUE ~ reformat_key))
+}  
+  
+
 #when reformat key is split in the lookup table, the score will be duplicated to give a value for the two final category 
 #use fuzzy join to match categories that are split into two, fuzzy join looks for the best match between the lookup table and the data in sub_category column 
 split <- fuzzyjoin::stringdist_join( 
@@ -617,6 +638,8 @@ for (i in seq_along(file_list)) {
   
   reformat_function(file, format, character_name) #use reformat function to reformat
   
+  
+  
   data_list_impact[[j]] <- final_data #add the new dataframe to a list
   }
   }
@@ -650,50 +673,20 @@ source(file.path(here::here(),"src/tests.R"))
 
 # Save the Data as a Google Sheet
 
-let's do a quick test first to see what we can do:
-
-```{r}
-# test it out --------------
-# just running this line creates a spreadsheet with a unique name that's really funny! "unpleasant-buffalo"
-MPS_sheet <- write_sheet(data = MPS_tracker_data, # give it a data.frame object 
-                         sheet = "test-mps")      # this argument specifies the sheet name, not file name
-##### NA columns just get stored as 'blank'
-#####--- our MPS_tracker_data data.frame file started with 316 rows and the google sheet has 317 rows ... this is because the data.frame object does not include the column names as a row, but the google sheet does 
-
-# control file name - initialize sheet --------------------  
-# ok I want to control what that file is called... this means i have to use the 'gs4_create()' function
-# call this function first to initialize a google sheet and then use write_sheet to add data to it
-test_gs4_sheet <- gs4_create("file_name", 
-                             sheets = "sheet_name")
-
-# try moving the spreadsheet ----------------------- 
-# I am moving this file called "file name" into arbitary file in our shared google drive: "iMPAct_drive/data/write_to_here_gs4"
-# ok now it's moved so let's add our data to it 
-
-# write our data to the sheet in correct position within drive ------------------------ 
-write_sheet(data = MPS_tracker_data,
-            ss = test_gs4_sheet,
-            sheet = "sheet_name")
-# alright! I checked that file in our google drive and our data is there! yay :)
-
-# let's move this test df we made to the trash --------------------
-googledrive::drive_trash(test_gs4_sheet) # boom! this file is now in my trash folder 
-```
-
 Ok now that we have tested things out with googlesheet4 let's make a final spreadsheet where all the data is going to live and be pulled from for our Shiny apps. **Only run this code if this is the first time you are creating the Google Sheet.**
 
 ```{r}
-MPS_final_sheet <- gs4_create("compiled_MPS")
-write_sheet(data = MPS_tracker_data,
-            ss = MPS_final_sheet, 
-            sheet = "Sheet1")
+#MPS_final_sheet <- gs4_create("compiled_MPS")
+#write_sheet(data = MPS_tracker_data,
+            #ss = MPS_final_sheet, 
+           # sheet = "Sheet1")
 # OK now we're ready to pull from this sheet! 
 ```
 
 Once the above sheet has already been created and we want to overwrite it with the data we just made uncomment and run the code below. **Warning: Do not run this code if you do not want to entirely overwrite the existing Google Sheet with whatever is contained in the MPS_tracker_data object.**
 
 ```{r}
-write_sheet(data = MPS_tracker_data,
-           ss = "1cUz4WZ1CRHFicuVUt82kJ_mL9Ur861Dn1c0BYu3NmRY", 
-            sheet = "Sheet1")
+#write_sheet(data = MPS_tracker_data,
+           #ss = "1cUz4WZ1CRHFicuVUt82kJ_mL9Ur861Dn1c0BYu3NmRY", 
+           # sheet = "Sheet1")
 ```
