@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-library(unpivotr)
+library(unpivotr)  
 library(tidyverse)
 library(readxl)
 library(tidyxl)

@@ -22,7 +22,7 @@ test_that("correct_categories", { expect_true(
 test_that("numeric_score", {expect_true(is.numeric(MPS_tracker_data$score))
   })
 
-#make sure category is in 1-5
+#make sure score is in 1-5
 test_that("1_5", { expect_true(
   all(MPS_tracker_data$score %in% c("1", "2", "3", "4", "5", NA))) })
 
