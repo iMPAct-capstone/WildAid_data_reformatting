@@ -49,6 +49,18 @@ test_that("file_number", {
 
 
 
+#test that there are no sites present in the data that are not on the final site list
+
+#read in main site list
+url <- "https://docs.google.com/spreadsheets/d/1945sRz1BzspN4hCT5VOTuiNpwSSaWKxfoxZeozrn1_M/edit#gid=1669338265"
+
+main_site_list <- read_sheet(url)
+
+mismatch <- anti_join(MPS_tracker_data,main_site_list, by = "site")
+
+test_that("site_matching", { expect_true(nrow(mismatch) == 0)
+  })
+
 
 
 

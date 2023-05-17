@@ -657,10 +657,10 @@ MPS_tracker_data <- rbind(df,df2) #combine both data frames
 This section reads a lookup table with the shortened site names used in the files and the full name of the site. It converts the site name to the full name and reformats the country name to have spaces when needed.
 
 ```{r}
-site_list <- read_excel(file.path(data_path, "tables", "site_list.xlsx")) #read list of reformatted site names 
+site_list <- read_excel(file.path(data_path, "tables", "site_list_lookup_table.xlsx")) #read list of reformatted site names 
 
 
-MPS_tracker_data <- left_join(MPS_tracker_data, site_list, by = c("site", "country")) |> select(year, category, sub_category, indicator_type, score, country = country_final, site = extended_name, comments, entered_by)
+MPS_tracker_data <- left_join(MPS_tracker_data, site_list, by = c("site", "country")) |> select(year, category, sub_category, indicator_type, score, country = country_final, site = final_name, comments, entered_by)
 ```
 
 # Testing
@@ -687,6 +687,6 @@ Once the above sheet has already been created and we want to overwrite it with t
 
 ```{r}
 #write_sheet(data = MPS_tracker_data,
-           #ss = "1cUz4WZ1CRHFicuVUt82kJ_mL9Ur861Dn1c0BYu3NmRY", 
-            #sheet = "Sheet1")
+         #  ss = "1cUz4WZ1CRHFicuVUt82kJ_mL9Ur861Dn1c0BYu3NmRY", 
+         #   sheet = "Sheet1")
 ```
