@@ -327,9 +327,9 @@ This section is to test individual files using the function, and ensure it is ou
 
 ```{r}
 
-file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[10]), sheet = 1) #read the cells of each file
-format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[10])) #read the format of each file
-file_name <- as.character(file_list[10])
+file_cells <- xlsx_cells(file.path(data_path, "raw", file_list[1]), sheet = 1) #read the cells of each file
+format_cells <- xlsx_formats(file.path(data_path, "raw", file_list[1])) #read the format of each file
+file_name <- as.character(file_list[1])
 
 #reformat_function(file_cells, format_cells, file_name)
 
@@ -491,7 +491,7 @@ TRUE ~ reformat_key))
 }
 
 collaboration_split <- data_reformat |> 
-  filter(str_detect(sub_category, "Collaboration")) |> filter(category == "Surveillance and Enforcement" ) #find the sufficient and qualified row, nrow will be 0 if they are not combined 
+  filter(str_detect(sub_category, "Collaboration")) |> filter(category == "Surveillance and Enforcement" ) #find the collaboration row or rows 
   
 #if they are in one category mark them to be split by changing the reformat_key to split 
 if (nrow(collaboration_split < 2) & year == 2022) {
