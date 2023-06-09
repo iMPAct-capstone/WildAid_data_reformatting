@@ -6,7 +6,7 @@ library(tidyverse)
 
 source(file.path(here::here(),"src/paths.R"))
 
-table <- read_xlsx(file.path(data_path, "tables", "data_lookuptable.xlsx")) #read in the excel table
+table <- read_xlsx(file.path(data_path, "tables", "reformat_subcategory.xlsx")) #read in the excel table, this table is stored in the lookup_tables folder on the client's Google Drive
 
  sub_category_table <- table |> pivot_longer( 
   cols = !c(Final_Category,final_name, indicator_type, reformat_comments, format),
@@ -23,4 +23,5 @@ table <- read_xlsx(file.path(data_path, "tables", "data_lookuptable.xlsx")) #rea
        
        )) |> select(-format)
   
- write_csv(sub_category_table, file.path(data_path, "tables", "subcategory_lookup_table.csv"))
+ write_csv(sub_category_table, file.path(data_path, "tables", "reformat_subcategory_tidy"))
+ #this file is saved in the lookup tables folder on the client's google drive 
