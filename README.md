@@ -2,7 +2,7 @@
 
 This repository is used to reformat the existing data MPS tracker data of our client, WildAid Marine. Data reformatting was done to convert the given data into machine readable format so the team could use the data to create their data entry and data visualization applications. All original files are in xlsx format and saved in one master Google Sheet through the code in this repository. 
 
-This README.txt file was generated on 2023-05-03 by the iMPAct Team
+# IMPAct Capstone Project README 
 
 GENERAL INFORMATION
 
