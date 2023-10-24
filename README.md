@@ -1,18 +1,18 @@
 # WildAid Data Reformatting
 
-This repository is used to reformat the existing data MPS tracker data of our client, WildAid Marine. Data reformatting was done to convert the given data into machine readable format so the team could use the data to create their data entry and data visualization applications. All original files are in xlsx format and saved in one master Google Sheet through the code in this repository. 
+This repository is used to reformat the existing MPS tracker data of our client, WildAid Marine. Data reformatting was done to convert the given data into machine readable format so it could be used to create data entry and data visualization applications. All original files are in xlsx format and saved in one master Google Sheet through the code in this repository. 
 
 # IMPAct Capstone Project README 
 
 ## GENERAL INFORMATION
 
-Title of the Project: Improving Monitoring & Evaluation of Marine Enforcement in Coastal Marine Protected Areas and Fisheries
+Title of the Project: Improving Monitoring & Evaluation of Enforcement in Coastal Marine Protected Areas and Fisheries
 
 Author Information Names: Kiran Favre, Elise Gonzales, Jared Petry, Adelaide Robinson Institution: University of California, Santa Barbara
 
 A. Client Contact Information Name: Silvia Bor Organization: WildAid Marine
 
-Date of data collection The data is continually input annually for sites across the globe. The purpose of this tool is to make the data entry and visualization process much easier than in the past. The data has been collected since 2019.
+Date of data collection The data is input annually for sites across the globe. The purpose of this tool is to make the data entry and visualization process much easier than in the past. The data has been collected since 2019.
 
 Geographic location of data collection: global
 
